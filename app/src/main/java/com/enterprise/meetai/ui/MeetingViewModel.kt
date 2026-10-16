@@ -135,43 +135,33 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
+    fun setShowDisclosure(show: Boolean) {
+        _showDisclosure.value = show
+    }
+
     fun startRecording(title: String = "Meeting Internal") {
         _meetingTitle.value = title
-        val intent = Intent(getApplication(), RecordingService::class.java).apply {
-            action = RecordingService.ACTION_START_RECORDING
-            putExtra(RecordingService.EXTRA_MEETING_TITLE, title)
-        }
-        getApplication<Application>().startForegroundService(intent)
+        RecordingService.startService(getApplication(), title)
     }
 
     fun pauseRecording() {
-        val intent = Intent(getApplication(), RecordingService::class.java).apply {
-            action = RecordingService.ACTION_PAUSE_RECORDING
-        }
-        getApplication<Application>().startService(intent)
+        RecordingService.pauseService(getApplication())
     }
 
     fun resumeRecording() {
-        val intent = Intent(getApplication(), RecordingService::class.java).apply {
-            action = RecordingService.ACTION_RESUME_RECORDING
-        }
-        getApplication<Application>().startService(intent)
+        RecordingService.resumeService(getApplication())
     }
 
     fun stopRecording() {
         recordingService?.let { service ->
-            val lastFile = service.lastRecordedFile
+            val lastFile = service.lastRecordedFile.value
             val title = _meetingTitle.value
             val durationSec = _elapsedSeconds.value
             if (lastFile != null && lastFile.exists()) {
                 onNewRecordingCompleted(lastFile, title, durationSec)
             }
         }
-
-        val intent = Intent(getApplication(), RecordingService::class.java).apply {
-            action = RecordingService.ACTION_STOP_RECORDING
-        }
-        getApplication<Application>().startService(intent)
+        RecordingService.stopService(getApplication())
     }
 
     fun selectMeetingForDocs(meeting: MeetingItem?) {
