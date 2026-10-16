@@ -38,7 +38,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.CalendarMonth
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudUpload
@@ -454,7 +454,7 @@ private fun CorporateTopBar(
                     .border(1.dp, colors.cardBorder, CircleShape)
             ) {
                 Icon(
-                    imageVector = Icons.Default.CalendarMonth,
+                    imageVector = Icons.Default.DateRange,
                     contentDescription = "Jadwal Rapat & Kalender",
                     tint = colors.textPrimary,
                     modifier = Modifier.size(18.dp)
@@ -763,7 +763,7 @@ private fun ScheduledMeetingsBar(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.CalendarMonth,
+                        imageVector = Icons.Default.DateRange,
                         contentDescription = null,
                         tint = colors.primary,
                         modifier = Modifier.size(15.dp)
@@ -1603,7 +1603,7 @@ private fun ScheduleMeetingDialog(
         onDismissRequest = onDismiss,
         title = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.CalendarMonth, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
+                Icon(Icons.Default.DateRange, contentDescription = null, tint = colors.primary, modifier = Modifier.size(20.dp))
                 Spacer(modifier = Modifier.width(8.dp))
                 Text("Jadwalkan Rapat & Google Calendar", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = colors.textPrimary)
             }
