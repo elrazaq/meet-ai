@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">MeetAI</string>
+    <string name="notification_channel_name">Perekaman Rapat</string>
+    <string name="notification_channel_desc">Notifikasi status aktif perekaman audio meeting MeetAI</string>
+    <string name="recording_notification_title">Sedang Merekam Rapat…</string>
+    <string name="recording_notification_text">MeetAI menjaga audio tetap aktif di latar belakang.</string>
+    <string name="stop_recording">Hentikan Rekaman</string>
+    <string name="permission_rationale_mic_title">Izin Mikrofon Dibutuhkan</string>
+    <string name="permission_rationale_mic_msg">MeetAI memerlukan akses mikrofon untuk merekam percakapan rapat internal Anda agar dapat diringkas oleh AI. Audio hanya dikirim ke backend resmi perusahaan.</string>
+</resources>

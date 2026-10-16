@@ -1,0 +1,22 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/app/build
+/captures
+.externalNativeBuild
+.cxx
+*.apk
+*.aab
+*.keystore
+*.jks
+
+# Backend
+backend/venv/
+backend/.env
+backend/storage/
+backend/__pycache__/
+*.pyc
+test_meeting.m4a

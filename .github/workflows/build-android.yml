@@ -1,0 +1,92 @@
+name: Build Android App (AAB & APK)
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Tipe Build (aab, apk, or both)'
+        required: true
+        default: 'both'
+        type: choice
+        options:
+          - both
+          - aab
+          - apk
+
+jobs:
+  build:
+    name: Build Android Release & Debug
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Grant Execute Permission for Gradlew
+        run: chmod +x ./gradlew
+
+      - name: Decode Release Keystore (Jika Secrets Tersedia)
+        id: keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "Keystore secret ditemukan, melakukan decode..."
+            echo "$KEYSTORE_BASE64" | base64 --decode > app/release.keystore
+            echo "has_keystore=true" >> $GITHUB_OUTPUT
+          else
+            echo "Keystore secret belum diisi, build akan menggunakan debug signing fallback."
+            echo "has_keystore=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build Android App Bundle (.aab)
+        if: github.event.inputs.build_type == 'aab' || github.event.inputs.build_type == 'both' || github.event_name == 'push'
+        env:
+          KEYSTORE_FILE: ${{ steps.keystore.outputs.has_keystore == 'true' && format('{0}/app/release.keystore', github.workspace) || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: ./gradlew bundleRelease --stacktrace
+
+      - name: Build Android APK (.apk)
+        if: github.event.inputs.build_type == 'apk' || github.event.inputs.build_type == 'both' || github.event_name == 'push'
+        env:
+          KEYSTORE_FILE: ${{ steps.keystore.outputs.has_keystore == 'true' && format('{0}/app/release.keystore', github.workspace) || '' }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ "${{ steps.keystore.outputs.has_keystore }}" = "true" ]; then
+            ./gradlew assembleRelease --stacktrace
+          else
+            ./gradlew assembleDebug --stacktrace
+          fi
+
+      - name: Upload AAB Bundle Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetai-app-bundle
+          path: app/build/outputs/bundle/**/*.aab
+          if-no-files-found: ignore
+
+      - name: Upload APK Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: meetai-apk-files
+          path: app/build/outputs/apk/**/*.apk
+          if-no-files-found: ignore
