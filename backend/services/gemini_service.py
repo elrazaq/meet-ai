@@ -3,18 +3,25 @@ import json
 import base64
 import logging
 import requests
+import time
 from typing import Dict, Any
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from prompts import SYSTEM_INSTRUCTION, ANALYSIS_PROMPT
 
 logger = logging.getLogger("MeetAI.GeminiService")
 
 class GeminiService:
     def __init__(self):
+        load_dotenv()
         self.api_key = os.getenv("GEMINI_API_KEY", "")
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
         self.fallback_models = [
             self.model_name,
-            "gemini-flash-latest"
+            "gemini-3.6-flash",
+            "gemini-3-flash-preview"
         ]
 
     def process_meeting_audio(self, audio_file_path: str, meeting_output_dir: str) -> Dict[str, Any]:
