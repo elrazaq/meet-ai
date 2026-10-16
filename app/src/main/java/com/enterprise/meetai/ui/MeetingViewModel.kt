@@ -5,33 +5,53 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.net.Uri
 import android.os.IBinder
+import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.enterprise.meetai.model.MeetingAiDocuments
 import com.enterprise.meetai.model.MeetingItem
 import com.enterprise.meetai.model.ProcessingStatus
 import com.enterprise.meetai.recorder.RecordingService
+import com.enterprise.meetai.worker.UploadMeetingWorker
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.asRequestBody
+import org.json.JSONObject
 import java.io.File
+import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 class MeetingViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(60, TimeUnit.SECONDS)
+        .writeTimeout(120, TimeUnit.SECONDS)
+        .readTimeout(120, TimeUnit.SECONDS)
+        .build()
 
     private var recordingService: RecordingService? = null
     private var isBound = false
 
     private val _isServiceRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isServiceRecording.asStateFlow()
+
+    private val _isServicePaused = MutableStateFlow(false)
+    val isPaused: StateFlow<Boolean> = _isServicePaused.asStateFlow()
 
     private val _elapsedSeconds = MutableStateFlow(0L)
     val elapsedSeconds: StateFlow<Long> = _elapsedSeconds.asStateFlow()
@@ -61,6 +81,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 viewModelScope.launch {
                     service.isRecording.collect { recording ->
                         _isServiceRecording.value = recording
+                    }
+                }
+                viewModelScope.launch {
+                    service.isPaused.collect { paused ->
+                        _isServicePaused.value = paused
                     }
                 }
                 viewModelScope.launch {
@@ -107,6 +132,14 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         RecordingService.startService(getApplication(), actualTitle)
     }
 
+    fun pauseRecording() {
+        RecordingService.pauseService(getApplication())
+    }
+
+    fun resumeRecording() {
+        RecordingService.resumeService(getApplication())
+    }
+
     fun stopRecording() {
         RecordingService.stopService(getApplication())
     }
@@ -115,18 +148,173 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         _selectedMeetingForDocs.value = meeting
     }
 
-    fun uploadMeetingToAi(meeting: MeetingItem, serverUrl: String = com.enterprise.meetai.worker.UploadMeetingWorker.getServerUrl(getApplication())) {
+    /**
+     * Import dan unggah file audio dari galeri/penyimpanan HP
+     */
+    fun importAudioFile(uri: Uri, context: Context, customTitle: String = "") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val contentResolver = context.contentResolver
+                val timeStamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.getDefault()).format(Date())
+                val title = customTitle.ifBlank { "Rekaman Audio External" }
+                val sanitized = title.replace("[^a-zA-Z0-9_-]".toRegex(), "_")
+
+                val recordingsDir = File(context.filesDir, "recordings").apply { if (!exists()) mkdirs() }
+                val targetFile = File(recordingsDir, "IMP_${sanitized}_${timeStamp}.m4a")
+
+                contentResolver.openInputStream(uri)?.use { input ->
+                    FileOutputStream(targetFile).use { output ->
+                        input.copyTo(output)
+                    }
+                }
+
+                val sizeMb = String.format(Locale.US, "%.1f MB", targetFile.length() / (1024f * 1024f))
+                val newItem = MeetingItem(
+                    id = UUID.randomUUID().toString(),
+                    title = title,
+                    dateFormatted = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("id", "ID")).format(Date()),
+                    durationFormatted = "File Terunggah",
+                    localAudioFile = targetFile,
+                    fileSizeFormatted = sizeMb,
+                    status = ProcessingStatus.RECORDED_LOCAL,
+                    summarySnippet = "File audio berhasil diimpor ($sizeMb). Menghubungkan ke AI..."
+                )
+
+                withContext(Dispatchers.Main) {
+                    _meetings.value = listOf(newItem) + _meetings.value
+                    uploadMeetingToAi(newItem)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Gagal mengimpor file audio", e)
+            }
+        }
+    }
+
+    /**
+     * Mengunggah audio ke server backend & melakukan live polling hingga 4 dokumen selesai diekstrak AI
+     */
+    fun uploadMeetingToAi(
+        meeting: MeetingItem,
+        serverUrl: String = UploadMeetingWorker.getServerUrl(getApplication())
+    ) {
         val audio = meeting.localAudioFile ?: return
-        com.enterprise.meetai.worker.UploadMeetingWorker.enqueueUpload(
-            context = getApplication(),
-            audioFile = audio,
-            title = meeting.title,
-            serverUrl = serverUrl
-        )
-        // Update status meeting di state UI
-        _meetings.value = _meetings.value.map {
-            if (it.id == meeting.id) it.copy(status = ProcessingStatus.UPLOADING, summarySnippet = "Sedang mengunggah audio ke server backend...")
-            else it
+
+        // 1. Update status ke UPLOADING di UI
+        updateMeetingStatus(meeting.id, ProcessingStatus.UPLOADING, "Sedang mengunggah audio ke server backend...")
+
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                // 2. Upload Multipart ke FastAPI Backend
+                val fileRequestBody = audio.asRequestBody("audio/mp4".toMediaTypeOrNull())
+                val requestBody = MultipartBody.Builder()
+                    .setType(MultipartBody.FORM)
+                    .addFormDataPart("title", meeting.title)
+                    .addFormDataPart("audio_file", audio.name, fileRequestBody)
+                    .build()
+
+                val uploadRequest = Request.Builder()
+                    .url("$serverUrl/api/meetings/upload")
+                    .post(requestBody)
+                    .build()
+
+                val uploadResponse = httpClient.newCall(uploadRequest).execute()
+                if (!uploadResponse.isSuccessful) {
+                    val code = uploadResponse.code
+                    updateMeetingStatus(meeting.id, ProcessingStatus.FAILED, "Upload gagal (Kode HTTP $code). Periksa IP server.")
+                    return@launch
+                }
+
+                val responseJson = JSONObject(uploadResponse.body?.string() ?: "{}")
+                val backendMeetingId = responseJson.optString("meeting_id")
+
+                if (backendMeetingId.isBlank()) {
+                    updateMeetingStatus(meeting.id, ProcessingStatus.FAILED, "Respons server tidak memiliki Meeting ID.")
+                    return@launch
+                }
+
+                // 3. Update status ke AI_PROCESSING
+                updateMeetingStatus(meeting.id, ProcessingStatus.AI_PROCESSING, "Audio terunggah! Gemini AI sedang menganalisis & mengekstrak 4 dokumen...")
+
+                // 4. Polling status ke endpoint GET /api/meetings/{id} setiap 2 detik
+                var attempts = 0
+                val maxAttempts = 60 // Maksimal 2 menit
+                var isCompleted = false
+
+                while (attempts < maxAttempts && !isCompleted) {
+                    delay(2000)
+                    attempts++
+
+                    try {
+                        val pollRequest = Request.Builder()
+                            .url("$serverUrl/api/meetings/$backendMeetingId")
+                            .get()
+                            .build()
+
+                        val pollResponse = httpClient.newCall(pollRequest).execute()
+                        if (pollResponse.isSuccessful) {
+                            val pollJson = JSONObject(pollResponse.body?.string() ?: "{}")
+                            val currentStatus = pollJson.optString("status")
+
+                            if (currentStatus == "COMPLETED") {
+                                isCompleted = true
+                                val docsObj = pollJson.optJSONObject("documents")
+                                val notulen = docsObj?.optString("notulen") ?: ""
+                                val ringkasan = docsObj?.optString("ringkasan") ?: ""
+                                val poin = docsObj?.optString("poin_penting") ?: ""
+                                val tanyaJawab = docsObj?.optString("tanya_jawab_anti_plot_hole") ?: ""
+
+                                val snippet = if (ringkasan.isNotBlank()) {
+                                    ringkasan.lines().filter { it.isNotBlank() && !it.startsWith("#") }.take(2).joinToString(" ")
+                                } else {
+                                    "4 Dokumen rapat berhasil diekstrak tanpa plot hole."
+                                }
+
+                                withContext(Dispatchers.Main) {
+                                    _meetings.value = _meetings.value.map {
+                                        if (it.id == meeting.id) {
+                                            it.copy(
+                                                status = ProcessingStatus.COMPLETED,
+                                                summarySnippet = snippet,
+                                                documents = MeetingAiDocuments(
+                                                    notulenContent = notulen,
+                                                    ringkasanContent = ringkasan,
+                                                    poinPentingContent = poin,
+                                                    tanyaJawabContent = tanyaJawab
+                                                )
+                                            )
+                                        } else it
+                                    }
+                                }
+                                Log.d(TAG, "Polling selesai! Dokumen AI berhasil diperbarui di UI.")
+                                break
+                            } else if (currentStatus == "FAILED") {
+                                val err = pollJson.optString("error", "AI gagal memproses audio")
+                                updateMeetingStatus(meeting.id, ProcessingStatus.FAILED, "Analisis gagal: $err")
+                                break
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.w(TAG, "Polling attempt $attempts error: ${e.message}")
+                    }
+                }
+
+                if (!isCompleted && attempts >= maxAttempts) {
+                    updateMeetingStatus(meeting.id, ProcessingStatus.FAILED, "Waktu analisis habis. Ketuk untuk mencoba lagi.")
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Kesalahan jaringan saat upload / polling", e)
+                updateMeetingStatus(meeting.id, ProcessingStatus.FAILED, "Koneksi terputus: ${e.localizedMessage}")
+            }
+        }
+    }
+
+    private fun updateMeetingStatus(meetingId: String, status: ProcessingStatus, snippet: String) {
+        viewModelScope.launch(Dispatchers.Main) {
+            _meetings.value = _meetings.value.map {
+                if (it.id == meetingId) it.copy(status = status, summarySnippet = snippet)
+                else it
+            }
         }
     }
 
@@ -140,15 +328,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             localAudioFile = audioFile,
             fileSizeFormatted = sizeMb,
             status = ProcessingStatus.RECORDED_LOCAL,
-            summarySnippet = "Rekaman audio berhasil disimpan (~$sizeMb). Siap diproses AI menjadi 4 dokumen rapat."
+            summarySnippet = "Rekaman audio berhasil disimpan ($sizeMb). Memulai upload..."
         )
         _meetings.value = listOf(newItem) + _meetings.value
-        // Otomatis antrekan upload ke backend
         uploadMeetingToAi(newItem)
     }
 
     private fun loadSampleAndSavedRecordings() {
-        // Data inisial demonstrasi sesuai desain referensi (dengan 4 dokumen lengkap)
         val sampleCompleted = MeetingItem(
             id = "sample-1",
             title = "UI/UX Revamp Strategy & Q3 Roadmap",
@@ -203,9 +389,13 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             try {
                 getApplication<Application>().unbindService(serviceConnection)
             } catch (e: Exception) {
-                // Ignore unbind error
+                // Ignore
             }
             isBound = false
         }
+    }
+
+    companion object {
+        private const val TAG = "MeetingViewModel"
     }
 }

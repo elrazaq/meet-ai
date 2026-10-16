@@ -1,6 +1,11 @@
 package com.enterprise.meetai.ui
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -24,23 +29,29 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FiberManualRecord
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
@@ -54,9 +65,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -64,6 +77,7 @@ import com.enterprise.meetai.model.MeetingItem
 import com.enterprise.meetai.model.ProcessingStatus
 import com.enterprise.meetai.ui.components.DocumentsViewerModal
 import com.enterprise.meetai.ui.components.WaveformVisualizer
+import com.enterprise.meetai.ui.theme.AmberPending
 import com.enterprise.meetai.ui.theme.BgDark
 import com.enterprise.meetai.ui.theme.BlueInfo
 import com.enterprise.meetai.ui.theme.CardBorder
@@ -73,7 +87,6 @@ import com.enterprise.meetai.ui.theme.PinkSparkle
 import com.enterprise.meetai.ui.theme.PurpleAccent
 import com.enterprise.meetai.ui.theme.PurpleGlow
 import com.enterprise.meetai.ui.theme.PurplePrimary
-import com.enterprise.meetai.ui.theme.SurfaceDark
 import com.enterprise.meetai.ui.theme.TextDim
 import com.enterprise.meetai.ui.theme.TextMuted
 import com.enterprise.meetai.ui.theme.TextWhite
@@ -83,9 +96,11 @@ import java.util.Locale
 @Composable
 fun HomeScreen(
     viewModel: MeetingViewModel,
-    onRequestPermissionAndRecord: () -> Unit
+    onRequestPermissionAndRecord: () -> Unit,
+    onPickAudioFile: () -> Unit
 ) {
     val isRecording by viewModel.isRecording.collectAsState()
+    val isPaused by viewModel.isPaused.collectAsState()
     val elapsedSeconds by viewModel.elapsedSeconds.collectAsState()
     val currentAmplitude by viewModel.currentAmplitude.collectAsState()
     val meetings by viewModel.meetings.collectAsState()
@@ -105,28 +120,26 @@ fun HomeScreen(
     Scaffold(
         containerColor = BgDark,
         topBar = {
-            HomeTopBar(
-                onOpenSettings = { showSettingsDialog = true }
-            )
+            HomeTopBar(onOpenSettings = { showSettingsDialog = true })
         }
     ) { innerPadding ->
         LazyColumn(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(horizontal = 20.dp),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+                .padding(horizontal = 18.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
+            // Quick Action Cards (Record & Upload Audio File)
             item {
                 QuickActionBanners(
                     isRecording = isRecording,
-                    onStartClick = {
-                        showStartDialog = true
-                    }
+                    onStartClick = { showStartDialog = true },
+                    onUploadFileClick = onPickAudioFile
                 )
             }
 
-            // Banner status perekaman aktif (jika sedang merekam)
+            // Banner status perekaman aktif (Pause, Resume, Stop)
             item {
                 AnimatedVisibility(
                     visible = isRecording,
@@ -136,12 +149,15 @@ fun HomeScreen(
                     ActiveRecordingCard(
                         elapsedSeconds = elapsedSeconds,
                         amplitude = currentAmplitude,
+                        isPaused = isPaused,
+                        onPauseClick = { viewModel.pauseRecording() },
+                        onResumeClick = { viewModel.resumeRecording() },
                         onStopClick = { viewModel.stopRecording() }
                     )
                 }
             }
 
-            // Judul Section Rapat Terakhir
+            // Section Header: Recent Meetings
             item {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -151,11 +167,11 @@ fun HomeScreen(
                     Text(
                         text = "Recent Meeting",
                         color = TextWhite,
-                        fontSize = 20.sp,
+                        fontSize = 19.sp,
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${meetings.size} Tersimpan",
+                        text = "${meetings.size} Rapat",
                         color = TextDim,
                         fontSize = 13.sp
                     )
@@ -163,11 +179,18 @@ fun HomeScreen(
             }
 
             // List Kartu Rapat
-            items(meetings) { meeting ->
+            items(meetings, key = { it.id }) { meeting ->
                 MeetingItemCard(
                     meeting = meeting,
                     onClick = {
-                        viewModel.selectMeetingForDocs(meeting)
+                        if (meeting.status == ProcessingStatus.COMPLETED) {
+                            viewModel.selectMeetingForDocs(meeting)
+                        } else if (meeting.status == ProcessingStatus.FAILED) {
+                            viewModel.uploadMeetingToAi(meeting)
+                        }
+                    },
+                    onRetryUpload = {
+                        viewModel.uploadMeetingToAi(meeting)
                     }
                 )
             }
@@ -181,22 +204,23 @@ fun HomeScreen(
         if (showStartDialog) {
             androidx.compose.ui.window.Dialog(onDismissRequest = { showStartDialog = false }) {
                 Card(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = CardDark),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
+                    Column(modifier = Modifier.padding(22.dp)) {
                         Text(
-                            text = "Mulai Rekam Percakapan Rapat",
+                            text = "Mulai Rekam Rapat Baru",
                             color = TextWhite,
                             fontSize = 18.sp,
                             fontWeight = FontWeight.Bold
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Audio akan direkam dengan akselerasi AAC 16kHz hemat baterai di latar belakang.",
+                            text = "Audio direkam dengan kompresi AAC hardware 16kHz hemat daya. Mendukung pause/resume dan auto-pause saat telepon.",
                             color = TextMuted,
-                            fontSize = 13.sp
+                            fontSize = 13.sp,
+                            lineHeight = 17.sp
                         )
                         Spacer(modifier = Modifier.height(16.dp))
 
@@ -237,7 +261,7 @@ fun HomeScreen(
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = PurplePrimary)
                             ) {
-                                Text("Mulai Rekam", color = Color.White)
+                                Text("Mulai Rekam", color = Color.White, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -258,11 +282,11 @@ fun HomeScreen(
         if (showSettingsDialog) {
             androidx.compose.ui.window.Dialog(onDismissRequest = { showSettingsDialog = false }) {
                 Card(
-                    shape = RoundedCornerShape(20.dp),
+                    shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = CardDark),
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Column(modifier = Modifier.padding(20.dp)) {
+                    Column(modifier = Modifier.padding(22.dp)) {
                         Text(
                             text = "Pengaturan Server Backend",
                             color = TextWhite,
@@ -271,7 +295,7 @@ fun HomeScreen(
                         )
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
-                            text = "Masukkan alamat URL / IP backend di jaringan Wi-Fi lokal komputer Anda. Format: http://<IP-KOMPUTER>:8000",
+                            text = "Masukkan alamat IP backend laptop di jaringan Wi-Fi lokal. Format: http://<IP>:8000",
                             color = TextMuted,
                             fontSize = 12.sp,
                             lineHeight = 16.sp
@@ -314,7 +338,7 @@ fun HomeScreen(
                                 },
                                 colors = ButtonDefaults.buttonColors(containerColor = PurplePrimary)
                             ) {
-                                Text("Simpan URL", color = Color.White)
+                                Text("Simpan URL", color = Color.White, fontWeight = FontWeight.SemiBold)
                             }
                         }
                     }
@@ -329,26 +353,23 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 20.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            // Avatar profile
             Box(
                 modifier = Modifier
-                    .size(44.dp)
+                    .size(42.dp)
                     .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(listOf(PurplePrimary, PinkSparkle))
-                    ),
+                    .background(Brush.linearGradient(listOf(PurplePrimary, PinkSparkle))),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Mic,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(24.dp)
+                    modifier = Modifier.size(22.dp)
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -356,12 +377,12 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
                 Text(
                     text = "MeetAI Workspace 🏢",
                     color = TextMuted,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
                 Text(
-                    text = "Internal Meeting",
+                    text = "Internal Meeting Engine",
                     color = TextWhite,
-                    fontSize = 16.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -374,7 +395,7 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
                     .size(38.dp)
                     .background(CardDark, shape = CircleShape)
             ) {
-                Icon(imageVector = Icons.Default.Settings, contentDescription = "Server Settings", tint = PurpleGlow)
+                Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings", tint = PurpleGlow)
             }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
@@ -392,34 +413,35 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
 @Composable
 private fun QuickActionBanners(
     isRecording: Boolean,
-    onStartClick: () -> Unit
+    onStartClick: () -> Unit,
+    onUploadFileClick: () -> Unit
 ) {
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(14.dp)
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Kartu Utama Kiri: AI Auto-Extract Highlight
+        // Hero Card Kiri (AI Banner)
         Box(
             modifier = Modifier
                 .weight(1.2f)
-                .height(130.dp)
+                .height(134.dp)
                 .clip(RoundedCornerShape(22.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF2B2553),
-                            Color(0xFF1E1A3C)
+                            Color(0xFF28224E),
+                            Color(0xFF1B1738)
                         )
                     )
                 )
-                .border(1.dp, PurpleGlow.copy(alpha = 0.3f), RoundedCornerShape(22.dp))
+                .border(1.dp, PurpleGlow.copy(alpha = 0.25f), RoundedCornerShape(22.dp))
                 .padding(16.dp)
         ) {
             Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
-                        .size(38.dp)
-                        .background(PurplePrimary.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp)),
+                        .size(36.dp)
+                        .background(PurplePrimary.copy(alpha = 0.25f), shape = RoundedCornerShape(10.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -431,29 +453,29 @@ private fun QuickActionBanners(
                 }
 
                 Text(
-                    text = "AI auto-extracts 4 dokumen tanpa plot hole",
+                    text = "AI Ekstrak 4 Dokumen\nTanpa Plot Hole",
                     color = TextWhite,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.Medium,
-                    lineHeight = 17.sp
+                    fontWeight = FontWeight.SemiBold,
+                    lineHeight = 18.sp
                 )
             }
         }
 
-        // Kartu Kanan: Tombol Rekam & Tombol Status
+        // Dua Tombol Kanan: Rekam Rapat & Upload Audio
         Column(
             modifier = Modifier.weight(1f),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Tombol Record Audio
+            // Tombol 1: Rekam Suara Langsung
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
+                    .height(62.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(if (isRecording) Color(0xFFE11D48) else PurplePrimary)
                     .clickable { onStartClick() }
-                    .padding(horizontal = 14.dp),
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -461,42 +483,43 @@ private fun QuickActionBanners(
                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
                         text = if (isRecording) "Merekam..." else "Rekam Rapat",
                         color = Color.White,
-                        fontSize = 13.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold
                     )
                 }
             }
 
-            // Tombol 4 Dokumen Output
+            // Tombol 2: Upload File Audio dari HP
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(60.dp)
+                    .height(62.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .background(CardDark)
                     .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
-                    .padding(horizontal = 14.dp),
+                    .clickable { onUploadFileClick() }
+                    .padding(horizontal = 12.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Default.Description,
+                        imageVector = Icons.Default.AudioFile,
                         contentDescription = null,
                         tint = PinkSparkle,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "4 Output AI",
+                        text = "Upload Audio",
                         color = TextWhite,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
             }
@@ -508,20 +531,39 @@ private fun QuickActionBanners(
 private fun ActiveRecordingCard(
     elapsedSeconds: Long,
     amplitude: Int,
+    isPaused: Boolean,
+    onPauseClick: () -> Unit,
+    onResumeClick: () -> Unit,
     onStopClick: () -> Unit
 ) {
     val minutes = elapsedSeconds / 60
     val seconds = elapsedSeconds % 60
     val timeFormatted = String.format(Locale.US, "%02d:%02d", minutes, seconds)
 
+    // Animasi denyut titik merah saat aktif merekam
+    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+    val alphaAnim by infiniteTransition.animateFloat(
+        initialValue = 1f,
+        targetValue = 0.3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(600),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "alpha"
+    )
+
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = CardDark),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, Color(0xFFE11D48).copy(alpha = 0.5f), RoundedCornerShape(20.dp))
+            .border(
+                1.5.dp,
+                if (isPaused) AmberPending.copy(alpha = 0.7f) else Color(0xFFE11D48).copy(alpha = 0.7f),
+                RoundedCornerShape(22.dp)
+            )
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(18.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -531,54 +573,88 @@ private fun ActiveRecordingCard(
                     Icon(
                         imageVector = Icons.Default.FiberManualRecord,
                         contentDescription = null,
-                        tint = Color(0xFFEF4444),
-                        modifier = Modifier.size(16.dp)
+                        tint = if (isPaused) AmberPending else Color(0xFFEF4444),
+                        modifier = Modifier
+                            .size(16.dp)
+                            .then(if (!isPaused) Modifier.alpha(alphaAnim) else Modifier)
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "AI Tracker Recording (AAC 32kbps)",
-                        color = TextWhite,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
+                        text = if (isPaused) "REKAMAN DIJEDA (PAUSED)" else "SEDANG MEREKAM RAPAT",
+                        color = if (isPaused) AmberPending else Color(0xFFFCA5A5),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold
                     )
                 }
 
                 Text(
                     text = timeFormatted,
                     color = Color.White,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Waveform visualizer real-time
+            // Waveform visualizer real-time (tenang saat pause)
             WaveformVisualizer(
-                amplitude = amplitude,
-                isRecording = true,
+                amplitude = if (isPaused) 0 else amplitude,
+                isRecording = !isPaused,
                 modifier = Modifier.fillMaxWidth()
             )
 
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
+            // Baris Tombol Aksi: PAUSE/RESUME & STOP
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                Text(
-                    text = "Layar HP dapat dimatikan, rekaman aman berjalan.",
-                    color = TextDim,
-                    fontSize = 11.sp
-                )
+                // Tombol Jeda (Pause) / Lanjutkan (Resume)
+                Button(
+                    onClick = { if (isPaused) onResumeClick() else onPauseClick() },
+                    modifier = Modifier.weight(1f),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = if (isPaused) EmeraldSuccess else Color(0xFF374151)
+                    ),
+                    shape = RoundedCornerShape(12.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = if (isPaused) "Lanjutkan" else "Jeda (Pause)",
+                        fontSize = 13.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
 
+                // Tombol Hentikan & Proses AI (Stop)
                 Button(
                     onClick = onStopClick,
+                    modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = RoundedCornerShape(12.dp)
                 ) {
-                    Text("Selesai", fontSize = 12.sp, color = Color.White)
+                    Icon(
+                        imageVector = Icons.Default.Stop,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = Color.White
+                    )
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Text(
+                        text = "Selesai (Stop)",
+                        fontSize = 13.sp,
+                        color = Color.White,
+                        fontWeight = FontWeight.SemiBold
+                    )
                 }
             }
         }
@@ -588,7 +664,8 @@ private fun ActiveRecordingCard(
 @Composable
 private fun MeetingItemCard(
     meeting: MeetingItem,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onRetryUpload: () -> Unit
 ) {
     Card(
         shape = RoundedCornerShape(20.dp),
@@ -599,26 +676,24 @@ private fun MeetingItemCard(
             .clickable { onClick() }
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
-            // Header tanggal & durasi
+            // Header: Tanggal & Status Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
                     text = "${meeting.dateFormatted} • ${meeting.durationFormatted}",
                     color = TextDim,
-                    fontSize = 12.sp
+                    fontSize = 11.sp
                 )
-                Text(
-                    text = meeting.fileSizeFormatted,
-                    color = TextDim,
-                    fontSize = 12.sp
-                )
+
+                StatusBadge(status = meeting.status)
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // Judul
+            // Judul Rapat
             Text(
                 text = meeting.title,
                 color = TextWhite,
@@ -628,27 +703,124 @@ private fun MeetingItemCard(
 
             Spacer(modifier = Modifier.height(6.dp))
 
-            // Ringkasan singkat
+            // Ringkasan Snippet
             Text(
                 text = meeting.summarySnippet,
                 color = TextMuted,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
                 maxLines = 2
             )
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 4 Chip Indikator Dokumen
+            // 4 Chip Indikator Dokumen & Tombol Interaktif
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
                 DocumentChip(name = "1. Notulen", ready = meeting.status == ProcessingStatus.COMPLETED)
                 DocumentChip(name = "2. Ringkasan", ready = meeting.status == ProcessingStatus.COMPLETED)
                 DocumentChip(name = "3. Poin", ready = meeting.status == ProcessingStatus.COMPLETED)
                 DocumentChip(name = "4. Q&A", ready = meeting.status == ProcessingStatus.COMPLETED)
+
+                if (meeting.status == ProcessingStatus.FAILED) {
+                    Spacer(modifier = Modifier.weight(1f))
+                    IconButton(
+                        onClick = onRetryUpload,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Color(0xFFE11D48).copy(alpha = 0.2f), shape = CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Retry",
+                            tint = Color(0xFFEF4444),
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
             }
+        }
+    }
+}
+
+@Composable
+private fun StatusBadge(status: ProcessingStatus) {
+    when (status) {
+        ProcessingStatus.COMPLETED -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(EmeraldSuccess.copy(alpha = 0.2f), shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = null,
+                    tint = EmeraldSuccess,
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("4 Dokumen Siap", color = EmeraldSuccess, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        ProcessingStatus.AI_PROCESSING -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(AmberPending.copy(alpha = 0.2f), shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = AmberPending,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(10.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("AI Menganalisis...", color = AmberPending, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        ProcessingStatus.UPLOADING -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(BlueInfo.copy(alpha = 0.2f), shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                CircularProgressIndicator(
+                    color = BlueInfo,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(10.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Mengunggah...", color = BlueInfo, fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        ProcessingStatus.FAILED -> {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(Color(0xFFE11D48).copy(alpha = 0.2f), shape = RoundedCornerShape(8.dp))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = Color(0xFFEF4444),
+                    modifier = Modifier.size(12.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Gagal • Coba Lagi", color = Color(0xFFEF4444), fontSize = 11.sp, fontWeight = FontWeight.SemiBold)
+            }
+        }
+        ProcessingStatus.RECORDED_LOCAL -> {
+            Text(
+                text = "Tersimpan Lokal",
+                color = TextDim,
+                fontSize = 11.sp
+            )
         }
     }
 }
@@ -658,12 +830,12 @@ private fun DocumentChip(name: String, ready: Boolean) {
     Box(
         modifier = Modifier
             .background(
-                if (ready) PurpleAccent.copy(alpha = 0.25f) else Color(0xFF27273A),
+                if (ready) PurpleAccent.copy(alpha = 0.25f) else Color(0xFF221F38),
                 shape = RoundedCornerShape(8.dp)
             )
             .border(
                 1.dp,
-                if (ready) PurpleAccent else Color(0xFF383852),
+                if (ready) PurpleAccent else Color(0xFF332F52),
                 shape = RoundedCornerShape(8.dp)
             )
             .padding(horizontal = 8.dp, vertical = 4.dp)
@@ -671,7 +843,7 @@ private fun DocumentChip(name: String, ready: Boolean) {
         Text(
             text = name,
             color = if (ready) PurpleGlow else TextDim,
-            fontSize = 11.sp,
+            fontSize = 10.sp,
             fontWeight = FontWeight.Medium
         )
     }

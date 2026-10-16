@@ -2,6 +2,7 @@ package com.enterprise.meetai
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -20,6 +21,16 @@ import com.enterprise.meetai.ui.theme.MeetAiTheme
 class MainActivity : ComponentActivity() {
 
     private val viewModel: MeetingViewModel by viewModels()
+
+    // ActivityResultLauncher untuk memilih file audio dari penyimpanan HP
+    private val pickAudioLauncher = registerForActivityResult(
+        ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        uri?.let {
+            viewModel.importAudioFile(it, this)
+            Toast.makeText(this, "File audio berhasil dipilih. Memulai ekstraksi 4 dokumen AI...", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // ActivityResultLauncher untuk izin mikrofon & notifikasi
     private val requestPermissionsLauncher = registerForActivityResult(
@@ -45,6 +56,9 @@ class MainActivity : ComponentActivity() {
                     viewModel = viewModel,
                     onRequestPermissionAndRecord = {
                         checkAndRequestMicrophonePermission()
+                    },
+                    onPickAudioFile = {
+                        pickAudioLauncher.launch("audio/*")
                     }
                 )
 
@@ -71,10 +85,8 @@ class MainActivity : ComponentActivity() {
         ) == PackageManager.PERMISSION_GRANTED
 
         if (!hasMic) {
-            // Tampilkan Prominent Disclosure terlebih dahulu sebelum dialog sistem muncul (Kepatuhan Play Store)
             viewModel.setShowDisclosure(true)
         } else {
-            // Izin sudah ada, cek notifikasi Android 13+
             checkNotificationPermissionOnly()
         }
     }

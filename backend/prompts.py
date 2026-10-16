@@ -73,5 +73,9 @@ INI ADALAH BAGIAN PALING KRUSIAL AGAR TIDAK ADA CELAH INFORMASI:
   - Catat poin perselisihan atau ketidaksepakatan (jika ada argumen yang belum mencapai mufakat).
   - Berikan rekomendasi tindak lanjut spesifik untuk menutup celah informasi tersebut.
 
+### ATURAN KHUSUS PENYARINGAN SUARA & INTERUPSI TELEPON (PENTING):
+- ABAIKAN secara tegas setiap interupsi panggilan telepon pribadi (misalnya peserta mengangkat telepon seluler, mengobrol urusan pribadi/keluarga di tengah rapat), obrolan basa-basi santai saat istirahat, atau gangguan suara latar belakang.
+- FOKUS 100% hanya pada substansi agenda bisnis/operasional rapat internal perusahaan. Jangan sekali-kali memasukkan percakapan telepon pribadi ke dalam Notulen Rapat, Ringkasan, maupun Action Items.
+
 Pastikan respons Anda valid JSON tanpa ada tanda koma menggantung (*trailing commas*). Gunakan Bahasa Indonesia yang baku, profesional, dan akurat.
 """

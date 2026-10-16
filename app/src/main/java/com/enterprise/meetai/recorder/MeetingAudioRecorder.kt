@@ -61,6 +61,42 @@ class MeetingAudioRecorder(private val context: Context) {
     }
 
     /**
+     * Menjeda perekaman audio (Pause)
+     */
+    fun pause(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                recorder?.pause()
+                Log.d(TAG, "Perekaman dijeda (Paused)")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal pause recorder", e)
+            false
+        }
+    }
+
+    /**
+     * Melanjutkan perekaman audio yang dijeda (Resume)
+     */
+    fun resume(): Boolean {
+        return try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                recorder?.resume()
+                Log.d(TAG, "Perekaman dilanjutkan (Resumed)")
+                true
+            } else {
+                false
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal resume recorder", e)
+            false
+        }
+    }
+
+    /**
      * Mendapatkan nilai amplitudo mikrofon saat ini (0 .. 32767)
      * Digunakan untuk visualisasi grafik gelombang suara real-time di UI
      */
