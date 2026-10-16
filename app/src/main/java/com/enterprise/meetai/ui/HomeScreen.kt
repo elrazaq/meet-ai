@@ -32,14 +32,18 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.DeleteOutline
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.FiberManualRecord
-import androidx.compose.material.icons.filled.HourglassTop
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PictureAsPdf
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Upload
@@ -51,6 +55,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.NavigationBar
+import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
@@ -60,6 +67,7 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -67,6 +75,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -87,9 +96,11 @@ import com.enterprise.meetai.ui.theme.PinkSparkle
 import com.enterprise.meetai.ui.theme.PurpleAccent
 import com.enterprise.meetai.ui.theme.PurpleGlow
 import com.enterprise.meetai.ui.theme.PurplePrimary
+import com.enterprise.meetai.ui.theme.SurfaceDark
 import com.enterprise.meetai.ui.theme.TextDim
 import com.enterprise.meetai.ui.theme.TextMuted
 import com.enterprise.meetai.ui.theme.TextWhite
+import com.enterprise.meetai.utils.PdfExportUtils
 import java.util.Locale
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,6 +120,7 @@ fun HomeScreen(
     var newMeetingTitleInput by remember { mutableStateOf("") }
     var showStartDialog by remember { mutableStateOf(false) }
     var showSettingsDialog by remember { mutableStateOf(false) }
+    var selectedBottomNavIndex by remember { mutableIntStateOf(0) }
 
     val context = LocalContext.current
     var serverUrlInput by remember {
@@ -121,6 +133,24 @@ fun HomeScreen(
         containerColor = BgDark,
         topBar = {
             HomeTopBar(onOpenSettings = { showSettingsDialog = true })
+        },
+        bottomBar = {
+            MeetAiBottomNavigation(
+                selectedIndex = selectedBottomNavIndex,
+                onSelectIndex = { index ->
+                    selectedBottomNavIndex = index
+                    if (index == 2) {
+                        if (isRecording) viewModel.stopRecording() else showStartDialog = true
+                    } else if (index == 3) {
+                        meetings.firstOrNull { it.status == ProcessingStatus.COMPLETED }?.let {
+                            viewModel.selectMeetingForDocs(it)
+                        }
+                    } else if (index == 4) {
+                        showSettingsDialog = true
+                    }
+                },
+                isRecording = isRecording
+            )
         }
     ) { innerPadding ->
         LazyColumn(
@@ -171,14 +201,14 @@ fun HomeScreen(
                         fontWeight = FontWeight.Bold
                     )
                     Text(
-                        text = "${meetings.size} Rapat",
+                        text = "${meetings.size} Rapat Tersimpan",
                         color = TextDim,
-                        fontSize = 13.sp
+                        fontSize = 12.sp
                     )
                 }
             }
 
-            // List Kartu Rapat
+            // List Kartu Rapat Permanen
             items(meetings, key = { it.id }) { meeting ->
                 MeetingItemCard(
                     meeting = meeting,
@@ -189,14 +219,20 @@ fun HomeScreen(
                             viewModel.uploadMeetingToAi(meeting)
                         }
                     },
+                    onExportPdf = {
+                        PdfExportUtils.exportAndSharePdf(context, meeting)
+                    },
                     onRetryUpload = {
                         viewModel.uploadMeetingToAi(meeting)
+                    },
+                    onDelete = {
+                        viewModel.deleteMeeting(meeting.id)
                     }
                 )
             }
 
             item {
-                Spacer(modifier = Modifier.height(30.dp))
+                Spacer(modifier = Modifier.height(24.dp))
             }
         }
 
@@ -278,7 +314,7 @@ fun HomeScreen(
             )
         }
 
-        // Dialog Pengaturan IP Server Backend (Wi-Fi Local Testing)
+        // Dialog Pengaturan IP Server Backend
         if (showSettingsDialog) {
             androidx.compose.ui.window.Dialog(onDismissRequest = { showSettingsDialog = false }) {
                 Card(
@@ -360,7 +396,7 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(42.dp)
+                    .size(44.dp)
                     .clip(CircleShape)
                     .background(Brush.linearGradient(listOf(PurplePrimary, PinkSparkle))),
                 contentAlignment = Alignment.Center
@@ -369,7 +405,7 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
                     imageVector = Icons.Default.Mic,
                     contentDescription = null,
                     tint = Color.White,
-                    modifier = Modifier.size(22.dp)
+                    modifier = Modifier.size(24.dp)
                 )
             }
             Spacer(modifier = Modifier.width(12.dp))
@@ -382,7 +418,7 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
                 Text(
                     text = "Internal Meeting Engine",
                     color = TextWhite,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
@@ -392,19 +428,21 @@ private fun HomeTopBar(onOpenSettings: () -> Unit) {
             IconButton(
                 onClick = onOpenSettings,
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(40.dp)
                     .background(CardDark, shape = CircleShape)
+                    .border(1.dp, CardBorder, CircleShape)
             ) {
-                Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings", tint = PurpleGlow)
+                Icon(imageVector = Icons.Default.Settings, contentDescription = "Settings", tint = PurpleGlow, modifier = Modifier.size(20.dp))
             }
             Spacer(modifier = Modifier.width(8.dp))
             IconButton(
                 onClick = {},
                 modifier = Modifier
-                    .size(38.dp)
+                    .size(40.dp)
                     .background(CardDark, shape = CircleShape)
+                    .border(1.dp, CardBorder, CircleShape)
             ) {
-                Icon(imageVector = Icons.Default.Notifications, contentDescription = "Alerts", tint = TextMuted)
+                Icon(imageVector = Icons.Default.Notifications, contentDescription = "Alerts", tint = TextMuted, modifier = Modifier.size(20.dp))
             }
         }
     }
@@ -420,35 +458,35 @@ private fun QuickActionBanners(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        // Hero Card Kiri (AI Banner)
+        // Hero Card Kiri (AI Banner Gradient)
         Box(
             modifier = Modifier
                 .weight(1.2f)
-                .height(134.dp)
+                .height(138.dp)
                 .clip(RoundedCornerShape(22.dp))
                 .background(
                     Brush.verticalGradient(
                         colors = listOf(
-                            Color(0xFF28224E),
-                            Color(0xFF1B1738)
+                            Color(0xFF2C2454),
+                            Color(0xFF1D183B)
                         )
                     )
                 )
-                .border(1.dp, PurpleGlow.copy(alpha = 0.25f), RoundedCornerShape(22.dp))
+                .border(1.2.dp, PurpleGlow.copy(alpha = 0.35f), RoundedCornerShape(22.dp))
                 .padding(16.dp)
         ) {
             Column(verticalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxSize()) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .background(PurplePrimary.copy(alpha = 0.25f), shape = RoundedCornerShape(10.dp)),
+                        .size(38.dp)
+                        .background(PurplePrimary.copy(alpha = 0.3f), shape = RoundedCornerShape(12.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.AutoAwesome,
                         contentDescription = null,
                         tint = PurpleGlow,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                 }
 
@@ -456,7 +494,7 @@ private fun QuickActionBanners(
                     text = "AI Ekstrak 4 Dokumen\nTanpa Plot Hole",
                     color = TextWhite,
                     fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
+                    fontWeight = FontWeight.Bold,
                     lineHeight = 18.sp
                 )
             }
@@ -471,11 +509,14 @@ private fun QuickActionBanners(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(if (isRecording) Color(0xFFE11D48) else PurplePrimary)
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(
+                        if (isRecording) Brush.horizontalGradient(listOf(Color(0xFFE11D48), Color(0xFFBE123C)))
+                        else Brush.horizontalGradient(listOf(PurplePrimary, PurpleAccent))
+                    )
                     .clickable { onStartClick() }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -483,7 +524,7 @@ private fun QuickActionBanners(
                         imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.Mic,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -499,12 +540,12 @@ private fun QuickActionBanners(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(62.dp)
-                    .clip(RoundedCornerShape(16.dp))
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(18.dp))
                     .background(CardDark)
-                    .border(1.dp, CardBorder, RoundedCornerShape(16.dp))
+                    .border(1.dp, CardBorder, RoundedCornerShape(18.dp))
                     .clickable { onUploadFileClick() }
-                    .padding(horizontal = 12.dp),
+                    .padding(horizontal = 14.dp),
                 contentAlignment = Alignment.CenterStart
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -512,7 +553,7 @@ private fun QuickActionBanners(
                         imageVector = Icons.Default.AudioFile,
                         contentDescription = null,
                         tint = PinkSparkle,
-                        modifier = Modifier.size(20.dp)
+                        modifier = Modifier.size(22.dp)
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
@@ -540,7 +581,6 @@ private fun ActiveRecordingCard(
     val seconds = elapsedSeconds % 60
     val timeFormatted = String.format(Locale.US, "%02d:%02d", minutes, seconds)
 
-    // Animasi denyut titik merah saat aktif merekam
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
     val alphaAnim by infiniteTransition.animateFloat(
         initialValue = 1f,
@@ -559,7 +599,7 @@ private fun ActiveRecordingCard(
             .fillMaxWidth()
             .border(
                 1.5.dp,
-                if (isPaused) AmberPending.copy(alpha = 0.7f) else Color(0xFFE11D48).copy(alpha = 0.7f),
+                if (isPaused) AmberPending.copy(alpha = 0.8f) else Color(0xFFE11D48).copy(alpha = 0.8f),
                 RoundedCornerShape(22.dp)
             )
     ) {
@@ -590,14 +630,13 @@ private fun ActiveRecordingCard(
                 Text(
                     text = timeFormatted,
                     color = Color.White,
-                    fontSize = 16.sp,
+                    fontSize = 17.sp,
                     fontWeight = FontWeight.Bold
                 )
             }
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // Waveform visualizer real-time (tenang saat pause)
             WaveformVisualizer(
                 amplitude = if (isPaused) 0 else amplitude,
                 isRecording = !isPaused,
@@ -606,19 +645,17 @@ private fun ActiveRecordingCard(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // Baris Tombol Aksi: PAUSE/RESUME & STOP
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Tombol Jeda (Pause) / Lanjutkan (Resume)
                 Button(
                     onClick = { if (isPaused) onResumeClick() else onPauseClick() },
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isPaused) EmeraldSuccess else Color(0xFF374151)
+                        containerColor = if (isPaused) EmeraldSuccess else Color(0xFF332D56)
                     ),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(
                         imageVector = if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
@@ -628,19 +665,18 @@ private fun ActiveRecordingCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isPaused) "Lanjutkan" else "Jeda (Pause)",
+                        text = if (isPaused) "Lanjutkan" else "Jeda",
                         fontSize = 13.sp,
                         color = Color.White,
                         fontWeight = FontWeight.SemiBold
                     )
                 }
 
-                // Tombol Hentikan & Proses AI (Stop)
                 Button(
                     onClick = onStopClick,
                     modifier = Modifier.weight(1f),
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626)),
-                    shape = RoundedCornerShape(12.dp)
+                    shape = RoundedCornerShape(14.dp)
                 ) {
                     Icon(
                         imageVector = Icons.Default.Stop,
@@ -665,18 +701,20 @@ private fun ActiveRecordingCard(
 private fun MeetingItemCard(
     meeting: MeetingItem,
     onClick: () -> Unit,
-    onRetryUpload: () -> Unit
+    onExportPdf: () -> Unit,
+    onRetryUpload: () -> Unit,
+    onDelete: () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(20.dp),
+        shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(containerColor = CardDark),
         modifier = Modifier
             .fillMaxWidth()
-            .border(1.dp, CardBorder, RoundedCornerShape(20.dp))
+            .border(1.dp, CardBorder, RoundedCornerShape(22.dp))
             .clickable { onClick() }
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            // Header: Tanggal & Status Badge
+        Column(modifier = Modifier.padding(18.dp)) {
+            // Header: Tanggal, Durasi & Status Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -714,7 +752,7 @@ private fun MeetingItemCard(
 
             Spacer(modifier = Modifier.height(14.dp))
 
-            // 4 Chip Indikator Dokumen & Tombol Interaktif
+            // 4 Chip Indikator Dokumen
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
@@ -724,21 +762,60 @@ private fun MeetingItemCard(
                 DocumentChip(name = "2. Ringkasan", ready = meeting.status == ProcessingStatus.COMPLETED)
                 DocumentChip(name = "3. Poin", ready = meeting.status == ProcessingStatus.COMPLETED)
                 DocumentChip(name = "4. Q&A", ready = meeting.status == ProcessingStatus.COMPLETED)
+            }
 
-                if (meeting.status == ProcessingStatus.FAILED) {
-                    Spacer(modifier = Modifier.weight(1f))
-                    IconButton(
-                        onClick = onRetryUpload,
-                        modifier = Modifier
-                            .size(32.dp)
-                            .background(Color(0xFFE11D48).copy(alpha = 0.2f), shape = CircleShape)
+            if (meeting.status == ProcessingStatus.COMPLETED) {
+                Spacer(modifier = Modifier.height(14.dp))
+                // Toolbar Aksi Cepat: Baca Dokumen, Ekspor PDF, Hapus
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedButton(
+                        onClick = onClick,
+                        modifier = Modifier.weight(1.2f),
+                        shape = RoundedCornerShape(10.dp),
+                        border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.linearGradient(listOf(PurpleAccent, CardBorder)))
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Retry",
-                            tint = Color(0xFFEF4444),
-                            modifier = Modifier.size(16.dp)
-                        )
+                        Icon(imageVector = Icons.Default.Description, contentDescription = null, tint = PurpleGlow, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Baca Dokumen", color = TextWhite, fontSize = 11.sp)
+                    }
+
+                    Button(
+                        onClick = onExportPdf,
+                        modifier = Modifier.weight(1f),
+                        colors = ButtonDefaults.buttonColors(containerColor = PurpleAccent),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.PictureAsPdf, contentDescription = null, tint = Color.White, modifier = Modifier.size(15.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("PDF", color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                    }
+
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .background(Color(0xFF221F38), shape = CircleShape)
+                    ) {
+                        Icon(imageVector = Icons.Default.DeleteOutline, contentDescription = "Hapus", tint = TextDim, modifier = Modifier.size(16.dp))
+                    }
+                }
+            } else if (meeting.status == ProcessingStatus.FAILED) {
+                Spacer(modifier = Modifier.height(12.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    OutlinedButton(
+                        onClick = onRetryUpload,
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(imageVector = Icons.Default.Refresh, contentDescription = null, tint = Color(0xFFEF4444), modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Coba Upload Ulang", color = Color(0xFFEF4444), fontSize = 11.sp)
                     }
                 }
             }
@@ -846,5 +923,85 @@ private fun DocumentChip(name: String, ready: Boolean) {
             fontSize = 10.sp,
             fontWeight = FontWeight.Medium
         )
+    }
+}
+
+/**
+ * Bottom Navigation Bar modern sesuai referensi desain UI asli
+ */
+@Composable
+private fun MeetAiBottomNavigation(
+    selectedIndex: Int,
+    onSelectIndex: (Int) -> Unit,
+    isRecording: Boolean
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(SurfaceDark)
+            .border(1.dp, CardBorder, RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+            .padding(vertical = 6.dp)
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceAround,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Tab 0: Home
+            IconButton(onClick = { onSelectIndex(0) }) {
+                Icon(
+                    imageVector = Icons.Default.Home,
+                    contentDescription = "Beranda",
+                    tint = if (selectedIndex == 0) PurpleGlow else TextDim
+                )
+            }
+
+            // Tab 1: History
+            IconButton(onClick = { onSelectIndex(1) }) {
+                Icon(
+                    imageVector = Icons.Default.Description,
+                    contentDescription = "Riwayat",
+                    tint = if (selectedIndex == 1) PurpleGlow else TextDim
+                )
+            }
+
+            // Tab 2: Floating Sparkle AI Center Action Button
+            Box(
+                modifier = Modifier
+                    .size(54.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (isRecording) Brush.linearGradient(listOf(Color(0xFFE11D48), Color(0xFFBE123C)))
+                        else Brush.linearGradient(listOf(PurplePrimary, PinkSparkle))
+                    )
+                    .clickable { onSelectIndex(2) },
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = if (isRecording) Icons.Default.Stop else Icons.Default.AutoAwesome,
+                    contentDescription = "Rekam AI",
+                    tint = Color.White,
+                    modifier = Modifier.size(26.dp)
+                )
+            }
+
+            // Tab 3: Documents
+            IconButton(onClick = { onSelectIndex(3) }) {
+                Icon(
+                    imageVector = Icons.Default.PictureAsPdf,
+                    contentDescription = "Dokumen",
+                    tint = if (selectedIndex == 3) PurpleGlow else TextDim
+                )
+            }
+
+            // Tab 4: Settings
+            IconButton(onClick = { onSelectIndex(4) }) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Pengaturan",
+                    tint = if (selectedIndex == 4) PurpleGlow else TextDim
+                )
+            }
+        }
     }
 }

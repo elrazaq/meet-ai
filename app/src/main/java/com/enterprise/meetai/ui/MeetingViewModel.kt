@@ -10,6 +10,7 @@ import android.os.IBinder
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.enterprise.meetai.data.MeetingRepository
 import com.enterprise.meetai.model.MeetingAiDocuments
 import com.enterprise.meetai.model.MeetingItem
 import com.enterprise.meetai.model.ProcessingStatus
@@ -37,6 +38,8 @@ import java.util.UUID
 import java.util.concurrent.TimeUnit
 
 class MeetingViewModel(application: Application) : AndroidViewModel(application) {
+
+    private val repository = MeetingRepository(application)
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(60, TimeUnit.SECONDS)
@@ -284,8 +287,9 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                                             )
                                         } else it
                                     }
+                                    repository.saveMeetings(_meetings.value)
                                 }
-                                Log.d(TAG, "Polling selesai! Dokumen AI berhasil diperbarui di UI.")
+                                Log.d(TAG, "Polling selesai! Dokumen AI berhasil diperbarui di UI dan disimpan permanen.")
                                 break
                             } else if (currentStatus == "FAILED") {
                                 val err = pollJson.optString("error", "AI gagal memproses audio")
@@ -315,6 +319,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                 if (it.id == meetingId) it.copy(status = status, summarySnippet = snippet)
                 else it
             }
+            repository.saveMeetings(_meetings.value)
         }
     }
 
@@ -331,10 +336,23 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             summarySnippet = "Rekaman audio berhasil disimpan ($sizeMb). Memulai upload..."
         )
         _meetings.value = listOf(newItem) + _meetings.value
+        repository.saveMeetings(_meetings.value)
         uploadMeetingToAi(newItem)
     }
 
+    fun deleteMeeting(meetingId: String) {
+        _meetings.value = _meetings.value.filter { it.id != meetingId }
+        repository.saveMeetings(_meetings.value)
+    }
+
     private fun loadSampleAndSavedRecordings() {
+        val saved = repository.loadMeetings()
+        if (saved.isNotEmpty()) {
+            _meetings.value = saved
+            Log.d(TAG, "Riwayat pertemuan dimuat dari disk: ${saved.size} item")
+            return
+        }
+
         val sampleCompleted = MeetingItem(
             id = "sample-1",
             title = "UI/UX Revamp Strategy & Q3 Roadmap",
@@ -381,6 +399,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         )
 
         _meetings.value = listOf(sampleCompleted)
+        repository.saveMeetings(_meetings.value)
     }
 
     override fun onCleared() {
