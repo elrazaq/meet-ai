@@ -5,6 +5,7 @@ import android.util.Log
 import com.enterprise.meetai.model.MeetingAiDocuments
 import com.enterprise.meetai.model.MeetingItem
 import com.enterprise.meetai.model.ProcessingStatus
+import com.enterprise.meetai.model.ScheduledMeeting
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -13,6 +14,9 @@ class MeetingRepository(private val context: Context) {
 
     private val storageFile: File
         get() = File(context.filesDir, "meetings_history.json")
+
+    private val schedulesFile: File
+        get() = File(context.filesDir, "schedules_history.json")
 
     fun loadMeetings(): List<MeetingItem> {
         val file = storageFile
@@ -57,7 +61,9 @@ class MeetingRepository(private val context: Context) {
                         fileSizeFormatted = obj.optString("file_size_formatted", ""),
                         status = status,
                         documents = docs,
-                        summarySnippet = obj.optString("summary_snippet", "")
+                        summarySnippet = obj.optString("summary_snippet", ""),
+                        isUploadedFile = obj.optBoolean("is_uploaded_file", false),
+                        durationSeconds = obj.optLong("duration_seconds", 0L)
                     )
                 )
             }
@@ -82,6 +88,8 @@ class MeetingRepository(private val context: Context) {
                     put("file_size_formatted", item.fileSizeFormatted)
                     put("status", item.status.name)
                     put("summary_snippet", item.summarySnippet)
+                    put("is_uploaded_file", item.isUploadedFile)
+                    put("duration_seconds", item.durationSeconds)
 
                     val docsObj = JSONObject().apply {
                         put("notulen", item.documents.notulenContent ?: "")
@@ -98,6 +106,53 @@ class MeetingRepository(private val context: Context) {
             Log.d(TAG, "Riwayat ${meetings.size} rapat berhasil disimpan permanen ke disk.")
         } catch (e: Exception) {
             Log.e(TAG, "Gagal menyimpan riwayat rapat ke disk", e)
+        }
+    }
+
+    fun loadScheduledMeetings(): List<ScheduledMeeting> {
+        val file = schedulesFile
+        if (!file.exists()) return emptyList()
+
+        return try {
+            val jsonString = file.readText()
+            val jsonArray = JSONArray(jsonString)
+            val list = mutableListOf<ScheduledMeeting>()
+
+            for (i in 0 until jsonArray.length()) {
+                val obj = jsonArray.getJSONObject(i)
+                list.add(
+                    ScheduledMeeting(
+                        id = obj.getString("id"),
+                        title = obj.getString("title"),
+                        dateEpochMillis = obj.getLong("date_epoch_millis"),
+                        formattedDateTime = obj.getString("formatted_date_time"),
+                        agendaNotes = obj.optString("agenda_notes", "")
+                    )
+                )
+            }
+            list
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal memuat jadwal rapat", e)
+            emptyList()
+        }
+    }
+
+    fun saveScheduledMeetings(schedules: List<ScheduledMeeting>) {
+        try {
+            val jsonArray = JSONArray()
+            for (item in schedules) {
+                val obj = JSONObject().apply {
+                    put("id", item.id)
+                    put("title", item.title)
+                    put("date_epoch_millis", item.dateEpochMillis)
+                    put("formatted_date_time", item.formattedDateTime)
+                    put("agenda_notes", item.agendaNotes)
+                }
+                jsonArray.put(obj)
+            }
+            schedulesFile.writeText(jsonArray.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Gagal menyimpan jadwal rapat", e)
         }
     }
 

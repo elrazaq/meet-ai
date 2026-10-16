@@ -21,6 +21,10 @@ object PdfExportUtils {
 
     private const val TAG = "PdfExportUtils"
 
+    fun exportAndShareCorporatePdf(context: Context, meeting: MeetingItem) {
+        exportAndSharePdf(context, meeting, null)
+    }
+
     /**
      * Menghasilkan dokumen PDF formal dari 4 hasil ekstraksi AI dan membuka menu Share Android
      */
@@ -34,16 +38,16 @@ object PdfExportUtils {
 
             // Setup Paints
             val titlePaint = Paint().apply {
-                color = Color.rgb(76, 29, 149) // Deep Purple
+                color = Color.rgb(15, 23, 42) // Executive Deep Slate
                 textSize = 18f
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 isAntiAlias = true
             }
 
             val subtitlePaint = Paint().apply {
-                color = Color.rgb(100, 116, 139) // Slate Gray
+                color = Color.rgb(2, 132, 199) // Executive Teal
                 textSize = 10f
-                typeface = Typeface.DEFAULT
+                typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                 isAntiAlias = true
             }
 
@@ -121,8 +125,8 @@ object PdfExportUtils {
                     }
 
                     val isSubHeader = line.startsWith("#")
-                    val isBullet = line.startsWith("-") || line.startsWith("*")
-                    val cleanText = line.replace("#", "").trim()
+                    val isBullet = line.startsWith("- ") || (line.startsWith("* ") && !line.startsWith("**"))
+                    val cleanText = line.replace("#", "").replace("**", "").replace("*", "").trim()
 
                     val currentPaint = if (isSubHeader) sectionHeaderPaint else bodyPaint
                     val lineHeight = if (isSubHeader) 16f else 12f

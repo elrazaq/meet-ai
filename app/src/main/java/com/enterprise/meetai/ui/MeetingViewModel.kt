@@ -14,6 +14,7 @@ import com.enterprise.meetai.data.MeetingRepository
 import com.enterprise.meetai.model.MeetingAiDocuments
 import com.enterprise.meetai.model.MeetingItem
 import com.enterprise.meetai.model.ProcessingStatus
+import com.enterprise.meetai.model.ScheduledMeeting
 import com.enterprise.meetai.recorder.RecordingService
 import com.enterprise.meetai.worker.UploadMeetingWorker
 import kotlinx.coroutines.Dispatchers
@@ -36,6 +37,13 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.TimeUnit
+
+sealed class PingState {
+    object Idle : PingState()
+    object Pinging : PingState()
+    data class Success(val message: String) : PingState()
+    data class Error(val message: String) : PingState()
+}
 
 class MeetingViewModel(application: Application) : AndroidViewModel(application) {
 
@@ -71,8 +79,14 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     private val _meetings = MutableStateFlow<List<MeetingItem>>(emptyList())
     val meetings: StateFlow<List<MeetingItem>> = _meetings.asStateFlow()
 
+    private val _scheduledMeetings = MutableStateFlow<List<ScheduledMeeting>>(emptyList())
+    val scheduledMeetings: StateFlow<List<ScheduledMeeting>> = _scheduledMeetings.asStateFlow()
+
     private val _selectedMeetingForDocs = MutableStateFlow<MeetingItem?>(null)
     val selectedMeetingForDocs: StateFlow<MeetingItem?> = _selectedMeetingForDocs.asStateFlow()
+
+    private val _pingState = MutableStateFlow<PingState>(PingState.Idle)
+    val pingState: StateFlow<PingState> = _pingState.asStateFlow()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
@@ -101,11 +115,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                         _currentAmplitude.value = amp
                     }
                 }
-                viewModelScope.launch {
-                    service.lastRecordedFile.collect { file ->
-                        file?.let { onNewRecordingCompleted(it, _meetingTitle.value) }
-                    }
-                }
             }
         }
 
@@ -116,35 +125,53 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     }
 
     init {
-        bindToRecordingService()
+        bindRecordingService()
         loadSampleAndSavedRecordings()
+        loadSavedSchedules()
     }
 
-    private fun bindToRecordingService() {
+    private fun bindRecordingService() {
         val intent = Intent(getApplication(), RecordingService::class.java)
         getApplication<Application>().bindService(intent, serviceConnection, Context.BIND_AUTO_CREATE)
     }
 
-    fun setShowDisclosure(show: Boolean) {
-        _showDisclosure.value = show
-    }
-
-    fun startRecording(title: String) {
-        val actualTitle = title.ifBlank { "Meeting Internal" }
-        _meetingTitle.value = actualTitle
-        RecordingService.startService(getApplication(), actualTitle)
+    fun startRecording(title: String = "Meeting Internal") {
+        _meetingTitle.value = title
+        val intent = Intent(getApplication(), RecordingService::class.java).apply {
+            action = RecordingService.ACTION_START_RECORDING
+            putExtra(RecordingService.EXTRA_MEETING_TITLE, title)
+        }
+        getApplication<Application>().startForegroundService(intent)
     }
 
     fun pauseRecording() {
-        RecordingService.pauseService(getApplication())
+        val intent = Intent(getApplication(), RecordingService::class.java).apply {
+            action = RecordingService.ACTION_PAUSE_RECORDING
+        }
+        getApplication<Application>().startService(intent)
     }
 
     fun resumeRecording() {
-        RecordingService.resumeService(getApplication())
+        val intent = Intent(getApplication(), RecordingService::class.java).apply {
+            action = RecordingService.ACTION_RESUME_RECORDING
+        }
+        getApplication<Application>().startService(intent)
     }
 
     fun stopRecording() {
-        RecordingService.stopService(getApplication())
+        recordingService?.let { service ->
+            val lastFile = service.lastRecordedFile
+            val title = _meetingTitle.value
+            val durationSec = _elapsedSeconds.value
+            if (lastFile != null && lastFile.exists()) {
+                onNewRecordingCompleted(lastFile, title, durationSec)
+            }
+        }
+
+        val intent = Intent(getApplication(), RecordingService::class.java).apply {
+            action = RecordingService.ACTION_STOP_RECORDING
+        }
+        getApplication<Application>().startService(intent)
     }
 
     fun selectMeetingForDocs(meeting: MeetingItem?) {
@@ -180,11 +207,14 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     localAudioFile = targetFile,
                     fileSizeFormatted = sizeMb,
                     status = ProcessingStatus.RECORDED_LOCAL,
-                    summarySnippet = "File audio berhasil diimpor ($sizeMb). Menghubungkan ke AI..."
+                    summarySnippet = "File audio berhasil diimpor ($sizeMb). Menghubungkan ke AI...",
+                    isUploadedFile = true,
+                    durationSeconds = 0L
                 )
 
                 withContext(Dispatchers.Main) {
                     _meetings.value = listOf(newItem) + _meetings.value
+                    repository.saveMeetings(_meetings.value)
                     uploadMeetingToAi(newItem)
                 }
             } catch (e: Exception) {
@@ -202,12 +232,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
     ) {
         val audio = meeting.localAudioFile ?: return
 
-        // 1. Update status ke UPLOADING di UI
         updateMeetingStatus(meeting.id, ProcessingStatus.UPLOADING, "Sedang mengunggah audio ke server backend...")
 
         viewModelScope.launch(Dispatchers.IO) {
             try {
-                // 2. Upload Multipart ke FastAPI Backend
                 val fileRequestBody = audio.asRequestBody("audio/mp4".toMediaTypeOrNull())
                 val requestBody = MultipartBody.Builder()
                     .setType(MultipartBody.FORM)
@@ -235,12 +263,10 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     return@launch
                 }
 
-                // 3. Update status ke AI_PROCESSING
                 updateMeetingStatus(meeting.id, ProcessingStatus.AI_PROCESSING, "Audio terunggah! Gemini AI sedang menganalisis & mengekstrak 4 dokumen...")
 
-                // 4. Polling status ke endpoint GET /api/meetings/{id} setiap 2 detik
                 var attempts = 0
-                val maxAttempts = 60 // Maksimal 2 menit
+                val maxAttempts = 60
                 var isCompleted = false
 
                 while (attempts < maxAttempts && !isCompleted) {
@@ -289,7 +315,6 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                                     }
                                     repository.saveMeetings(_meetings.value)
                                 }
-                                Log.d(TAG, "Polling selesai! Dokumen AI berhasil diperbarui di UI dan disimpan permanen.")
                                 break
                             } else if (currentStatus == "FAILED") {
                                 val err = pollJson.optString("error", "AI gagal memproses audio")
@@ -313,6 +338,37 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
+    fun testServerPing(url: String) {
+        _pingState.value = PingState.Pinging
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val pingClient = httpClient.newBuilder()
+                    .connectTimeout(4, TimeUnit.SECONDS)
+                    .readTimeout(4, TimeUnit.SECONDS)
+                    .build()
+                val request = Request.Builder()
+                    .url("${url.trimEnd('/')}/health")
+                    .get()
+                    .build()
+                val response = pingClient.newCall(request).execute()
+                if (response.isSuccessful) {
+                    val body = response.body?.string() ?: "{}"
+                    val json = JSONObject(body)
+                    val model = json.optString("model", "gemini-3.5-flash")
+                    _pingState.value = PingState.Success("Terhubung! Server Online (Model: $model)")
+                } else {
+                    _pingState.value = PingState.Error("Server merespons kode HTTP ${response.code}")
+                }
+            } catch (e: Exception) {
+                _pingState.value = PingState.Error("Gagal: ${e.localizedMessage ?: "Cek IP & Wi-Fi"}")
+            }
+        }
+    }
+
+    fun resetPingState() {
+        _pingState.value = PingState.Idle
+    }
+
     private fun updateMeetingStatus(meetingId: String, status: ProcessingStatus, snippet: String) {
         viewModelScope.launch(Dispatchers.Main) {
             _meetings.value = _meetings.value.map {
@@ -323,17 +379,19 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         }
     }
 
-    private fun onNewRecordingCompleted(audioFile: File, title: String) {
+    private fun onNewRecordingCompleted(audioFile: File, title: String, durationSec: Long) {
         val sizeMb = String.format(Locale.US, "%.1f MB", audioFile.length() / (1024f * 1024f))
         val newItem = MeetingItem(
             id = UUID.randomUUID().toString(),
             title = title,
             dateFormatted = SimpleDateFormat("EEEE, d MMMM yyyy", Locale("id", "ID")).format(Date()),
-            durationFormatted = "${_elapsedSeconds.value / 60} Menit",
+            durationFormatted = "${durationSec / 60} Menit",
             localAudioFile = audioFile,
             fileSizeFormatted = sizeMb,
             status = ProcessingStatus.RECORDED_LOCAL,
-            summarySnippet = "Rekaman audio berhasil disimpan ($sizeMb). Memulai upload..."
+            summarySnippet = "Rekaman audio berhasil disimpan ($sizeMb). Memulai upload...",
+            isUploadedFile = false,
+            durationSeconds = durationSec
         )
         _meetings.value = listOf(newItem) + _meetings.value
         repository.saveMeetings(_meetings.value)
@@ -345,11 +403,30 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
         repository.saveMeetings(_meetings.value)
     }
 
+    fun addScheduledMeeting(title: String, notes: String, timeMillis: Long, formattedDateTime: String) {
+        val item = ScheduledMeeting(
+            title = title,
+            dateEpochMillis = timeMillis,
+            formattedDateTime = formattedDateTime,
+            agendaNotes = notes
+        )
+        _scheduledMeetings.value = listOf(item) + _scheduledMeetings.value
+        repository.saveScheduledMeetings(_scheduledMeetings.value)
+    }
+
+    fun deleteScheduledMeeting(id: String) {
+        _scheduledMeetings.value = _scheduledMeetings.value.filter { it.id != id }
+        repository.saveScheduledMeetings(_scheduledMeetings.value)
+    }
+
+    private fun loadSavedSchedules() {
+        _scheduledMeetings.value = repository.loadScheduledMeetings()
+    }
+
     private fun loadSampleAndSavedRecordings() {
         val saved = repository.loadMeetings()
         if (saved.isNotEmpty()) {
             _meetings.value = saved
-            Log.d(TAG, "Riwayat pertemuan dimuat dari disk: ${saved.size} item")
             return
         }
 
@@ -361,6 +438,8 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
             fileSizeFormatted = "13.8 MB",
             status = ProcessingStatus.COMPLETED,
             summarySnippet = "Membahas perombakan navigasi dan integrasi pricing model baru dengan 100% konsensus tim.",
+            isUploadedFile = false,
+            durationSeconds = 3360L,
             documents = MeetingAiDocuments(
                 notulenContent = """
                     # NOTULEN RAPAT RESMI
@@ -373,8 +452,11 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     - Reduksi kompleksitas checkout menjadi 2 langkah.
                     
                     ### 2. Action Items & PIC:
-                    - [x] Selma Knight: Finalisasi Figma mockup (Deadline: 20 Juni).
-                    - [ ] Malvis Berry: Arsitektur API backend Gemini (Deadline: 25 Juni).
+                    | No | Kegiatan / Tindak Lanjut | Penanggung Jawab (PIC) | Tenggat Waktu | Status |
+                    |---|---|---|---|---|
+                    | 1 | Finalisasi Figma Mockup | Selma Knight | 20 Juni 2025 | Selesai |
+                    | 2 | Arsitektur API Backend Gemini | Malvis Berry | 25 Juni 2025 | Proses |
+                    | 3 | Pengujian Kecepatan Audio AAC | Maria Joyce | 30 Juni 2025 | Terjadwal |
                 """.trimIndent(),
                 ringkasanContent = """
                     # RINGKASAN EKSEKUTIF (1 HALAMAN)
@@ -384,7 +466,7 @@ class MeetingViewModel(application: Application) : AndroidViewModel(application)
                     # POIN-POIN PENTING & DATA KUNCI
                     - **Target Penghematan Waktu**: 85% efisiensi dokumentasi rapat.
                     - **Ukuran Audio**: 32 kbps AAC menghasilkan 14 MB/jam, menghemat bandwidth cloud hingga 70%.
-                    - **Model AI**: Gemini 1.5/2.0 Flash dengan konteks audio multimodal 1 juta token.
+                    - **Model AI**: Gemini Flash dengan konteks audio multimodal komprehensif.
                 """.trimIndent(),
                 tanyaJawabContent = """
                     # REKAP TANYA-JAWAB & ANTI-PLOT-HOLE

@@ -33,5 +33,15 @@ data class MeetingItem(
     val fileSizeFormatted: String = "",
     val status: ProcessingStatus = ProcessingStatus.RECORDED_LOCAL,
     val documents: MeetingAiDocuments = MeetingAiDocuments(),
-    val summarySnippet: String = "Menunggu analisis AI untuk menghasilkan 4 dokumen rapat..."
+    val summarySnippet: String = "Menunggu analisis AI untuk menghasilkan 4 dokumen rapat...",
+    val isUploadedFile: Boolean = false,
+    val durationSeconds: Long = 0L
+)
+
+data class ScheduledMeeting(
+    val id: String = java.util.UUID.randomUUID().toString(),
+    val title: String,
+    val dateEpochMillis: Long,
+    val formattedDateTime: String,
+    val agendaNotes: String = ""
 )
