@@ -61,12 +61,13 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material3.AlertDialog
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -1341,7 +1342,7 @@ private fun PdfFileManagerView(
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
-                        Divider(color = colors.cardBorder, thickness = 0.8.dp)
+                        HorizontalDivider(color = colors.cardBorder, thickness = 0.8.dp)
                         Spacer(modifier = Modifier.height(12.dp))
 
                         Row(
@@ -1531,7 +1532,7 @@ private fun ServerSettingsDialog(
                     modifier = Modifier.fillMaxWidth(),
                     colors = ButtonDefaults.buttonColors(containerColor = colors.card),
                     shape = RoundedCornerShape(10.dp),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.linearGradient(listOf(colors.primary, colors.cardBorder)))
+                    border = BorderStroke(1.dp, Brush.linearGradient(listOf(colors.primary, colors.cardBorder)))
                 ) {
                     if (pingState is PingState.Pinging) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), color = colors.primary, strokeWidth = 2.dp)

@@ -34,7 +34,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Summarize
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.Divider
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -457,7 +457,7 @@ fun RenderMarkdownTable(tableLines: List<String>) {
                 }
             }
 
-            Divider(color = colors.cardBorder, thickness = 1.dp)
+            HorizontalDivider(color = colors.cardBorder, thickness = 1.dp)
 
             // Baris Data Tabel dengan efek zebra striping
             bodyRows.forEachIndexed { rowIndex, rowData ->
@@ -494,7 +494,7 @@ fun RenderMarkdownTable(tableLines: List<String>) {
                     }
                 }
                 if (rowIndex < bodyRows.size - 1) {
-                    Divider(color = colors.cardBorder.copy(alpha = 0.4f), thickness = 0.5.dp)
+                    HorizontalDivider(color = colors.cardBorder.copy(alpha = 0.4f), thickness = 0.5.dp)
                 }
             }
         }
