@@ -14,14 +14,12 @@ class GeminiService:
         self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
         self.fallback_models = [
             self.model_name,
-            "gemini-3.1-flash-lite",
-            "gemini-3.5-flash-lite",
             "gemini-flash-latest"
         ]
 
     def process_meeting_audio(self, audio_file_path: str, meeting_output_dir: str) -> Dict[str, Any]:
         """
-        Mengunggah audio ke Gemini AI via REST API dan mengekstrak 4 dokumen terpisah secara multimodal.
+        Mengunggah audio ke Gemini AI via REST API dan mengekstrak 4 dokumen terpisah secara mendalam & komprehensif.
         """
         logger.info(f"Membaca file audio untuk analisis Gemini: {audio_file_path}")
 
@@ -56,7 +54,8 @@ class GeminiService:
             ],
             "generationConfig": {
                 "response_mime_type": "application/json",
-                "temperature": 0.2
+                "temperature": 0.2,
+                "maxOutputTokens": 8192
             }
         }
 
@@ -68,30 +67,38 @@ class GeminiService:
         last_error = None
         parsed_json = None
 
-        # Coba model utama dan fallback model jika terjadi 503 / high demand
+        # Coba model utama dengan retry 3x jika terjadi spike 503 (agar tidak downgrade ke model lite yang pendek)
         for model in self.fallback_models:
             endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
-            logger.info(f"Mencoba inference dengan model: {model}...")
-            try:
-                response = requests.post(endpoint, headers=headers, json=payload, timeout=90)
-                if response.status_code == 200:
-                    resp_data = response.json()
-                    candidates = resp_data.get("candidates", [])
-                    if candidates:
-                        raw_text = candidates[0]["content"]["parts"][0]["text"]
-                        parsed_json = json.loads(raw_text)
-                        logger.info(f"Berhasil dianalisis dengan model: {model}")
+            
+            for attempt in range(1, 4):
+                logger.info(f"Mencoba inference dengan model: {model} (Percobaan {attempt}/3)...")
+                try:
+                    response = requests.post(endpoint, headers=headers, json=payload, timeout=120)
+                    if response.status_code == 200:
+                        resp_data = response.json()
+                        candidates = resp_data.get("candidates", [])
+                        if candidates:
+                            raw_text = candidates[0]["content"]["parts"][0]["text"]
+                            parsed_json = json.loads(raw_text)
+                            logger.info(f"Berhasil dianalisis dengan model: {model} (Percobaan {attempt})")
+                            break
+                    elif response.status_code == 503:
+                        logger.warning(f"Model {model} sibuk sesaat (503), menunggu 2.5 detik untuk coba lagi...")
+                        last_error = f"Model {model} overload: {response.text}"
+                        time.sleep(2.5)
+                        continue
+                    else:
+                        logger.warning(f"Model {model} return HTTP {response.status_code}: {response.text}")
+                        last_error = f"HTTP {response.status_code}: {response.text}"
                         break
-                elif response.status_code == 503:
-                    logger.warning(f"Model {model} sibuk (503), mencoba model alternatif...")
-                    last_error = f"Model {model} overload: {response.text}"
-                    continue
-                else:
-                    logger.warning(f"Model {model} return HTTP {response.status_code}: {response.text}")
-                    last_error = f"HTTP {response.status_code}: {response.text}"
-            except Exception as e:
-                logger.error(f"Error koneksi pada model {model}: {e}")
-                last_error = str(e)
+                except Exception as e:
+                    logger.error(f"Error koneksi pada model {model}: {e}")
+                    last_error = str(e)
+                    time.sleep(2.0)
+
+            if parsed_json:
+                break
 
         if not parsed_json:
             logger.warning(f"Semua panggilan Gemini gagal ({last_error}). Mengaktifkan smart mock fallback...")
